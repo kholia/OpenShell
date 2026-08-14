@@ -95,6 +95,7 @@ fn runtime_config() -> DockerDriverRuntimeConfig {
         sandbox_namespace: "default".to_string(),
         grpc_endpoint: "https://localhost:8443".to_string(),
         network_name: DEFAULT_DOCKER_NETWORK_NAME.to_string(),
+        runtime: None,
         gateway_route: DockerGatewayRoute::Bridge {
             bind_address: SocketAddr::new(
                 IpAddr::V4(Ipv4Addr::new(172, 18, 0, 1)),
@@ -604,10 +605,72 @@ fn docker_compute_config_disables_bind_mounts_by_default() {
 }
 
 #[test]
+fn docker_compute_config_inherits_daemon_runtime_by_default() {
+    let cfg = DockerComputeConfig::default();
+    assert!(cfg.runtime.is_empty());
+}
+
+#[test]
+fn docker_runtime_omits_empty_selection() {
+    assert_eq!(docker_runtime("  ", &SystemInfo::default()).unwrap(), None);
+}
+
+#[test]
+fn docker_runtime_accepts_registered_selection() {
+    let info = SystemInfo {
+        runtimes: Some(HashMap::from([
+            ("runc".to_string(), bollard::models::Runtime::default()),
+            ("runsc".to_string(), bollard::models::Runtime::default()),
+        ])),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        docker_runtime(" runsc ", &info).unwrap(),
+        Some("runsc".to_string())
+    );
+}
+
+#[test]
+fn docker_runtime_rejects_unregistered_selection() {
+    let info = SystemInfo {
+        runtimes: Some(HashMap::from([(
+            "runc".to_string(),
+            bollard::models::Runtime::default(),
+        )])),
+        ..Default::default()
+    };
+
+    let err = docker_runtime("runsc", &info).unwrap_err().to_string();
+    assert!(err.contains("runtime 'runsc' is not registered"));
+    assert!(err.contains("available: runc"));
+}
+
+#[test]
+fn docker_runtime_rejects_missing_daemon_inventory() {
+    let err = docker_runtime("runsc", &SystemInfo::default())
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("did not report its registered runtimes"));
+}
+
+#[test]
 fn container_create_body_sets_driver_owned_pids_limit() {
     let body = build_container_create_body(&test_sandbox(), &runtime_config()).unwrap();
     let host_config = body.host_config.expect("host config");
     assert_eq!(host_config.pids_limit, Some(DEFAULT_SANDBOX_PIDS_LIMIT));
+}
+
+#[test]
+fn container_create_body_sets_configured_runtime() {
+    let mut config = runtime_config();
+    config.runtime = Some("runsc".to_string());
+
+    let body = build_container_create_body(&test_sandbox(), &config).unwrap();
+    assert_eq!(
+        body.host_config.expect("host config").runtime.as_deref(),
+        Some("runsc")
+    );
 }
 
 #[test]

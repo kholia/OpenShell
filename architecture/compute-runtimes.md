@@ -139,7 +139,7 @@ delete, reconciliation removes the row; otherwise it can remain `Deleting`.
 
 | Runtime | Best fit | Sandbox boundary | Notes |
 |---|---|---|---|
-| Docker | Local development with Docker available. | Container plus nested sandbox namespace. | Uses host networking so loopback gateway endpoints work from the supervisor. |
+| Docker | Local development with Docker available. | Container plus nested sandbox namespace. | Can pin all sandboxes to an operator-selected OCI runtime registered with the Docker daemon. |
 | Podman | Rootless or single-machine deployments. | Container plus nested sandbox namespace. | Uses the Podman REST API, OCI image volumes, and CDI GPU devices when available. |
 | Kubernetes | Cluster deployment through Helm. | Pod plus nested sandbox namespace. | Uses Kubernetes API objects, service accounts, secrets, PVC-backed workspace storage, and GPU resources. |
 | VM | Experimental microVM isolation. | Per-sandbox libkrun VM. | Managed endpoint-backed driver. The gateway spawns `openshell-driver-vm`, waits for its Unix socket, and then consumes it through the same remote `compute_driver.proto` path used by unmanaged endpoint drivers. The VM driver boots a cached bootstrap `rootfs.ext4`, prepares requested OCI images inside a bootstrap VM with `umoci`, attaches the prepared image disk read-only, and gives each sandbox a writable `overlay.ext4` for merged-root changes and runtime material. The driver persists each accepted launch request beside the overlay and restarts those VMs on driver startup without recreating the overlay. |
@@ -149,6 +149,12 @@ Per-sandbox CPU and memory values currently enter the driver layer through
 template resource limits. Docker and Podman apply them as runtime limits.
 Kubernetes mirrors each limit into the matching request. VM accepts the fields
 but currently ignores them.
+
+The Docker runtime selection is gateway-owned and applies uniformly to every
+sandbox. An explicit runtime name is validated against the daemon inventory at
+driver initialization; an empty selection inherits the daemon default. An
+alternate OCI runtime such as gVisor `runsc` strengthens the outer container
+boundary but does not replace OpenShell's nested supervisor or policy model.
 
 Docker and Podman also accept per-sandbox driver-config mounts for existing
 runtime-managed named volumes and tmpfs mounts. Podman additionally accepts

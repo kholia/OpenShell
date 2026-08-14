@@ -134,8 +134,10 @@ rationale, configured and effective modes, active generation, and the explicit
 
 ```bash
 docker info
+docker info --format '{{json .Runtimes}}'
 docker ps --filter name=openshell
 docker logs <container> --tail=200
+docker inspect --format '{{.HostConfig.Runtime}}' <container>
 docker run --rm --entrypoint /openshell-sandbox "${OPENSHELL_DOCKER_SUPERVISOR_IMAGE:-ghcr.io/nvidia/openshell/supervisor:latest}" --version
 openshell status
 ```
@@ -170,6 +172,8 @@ docker info --format '{{json .DiscoveredDevices}}'
 Common findings:
 
 - Docker daemon unavailable: start Docker Desktop or Docker Engine.
+- Gateway rejects a configured Docker OCI runtime: verify `[openshell.drivers.docker].runtime` exactly matches a name from `docker info --format '{{json .Runtimes}}'`. For gVisor, install and register `runsc` with the same Docker daemon, then restart the daemon and gateway.
+- A sandbox unexpectedly uses `runc`: inspect `.HostConfig.Runtime`. An empty Docker driver `runtime` inherits the daemon default; set `runtime = "runsc"` in `gateway.toml` to pin all OpenShell sandboxes.
 - Gateway process stopped: inspect exit status and logs.
 - Sandbox image missing or pull denied: verify image reference and registry credentials.
 - Sandbox fails before readiness with an identity-resolution error: inspect the image's OCI `USER` and matching `/etc/passwd` and `/etc/group` entries, or explicitly set both process identity fields in policy. Root and missing identities are rejected.

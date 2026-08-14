@@ -17,6 +17,7 @@
 # Sandbox image overrides:
 #   OPENSHELL_E2E_DOCKER_SANDBOX_IMAGE=...
 #   OPENSHELL_E2E_DOCKER_SANDBOX_IMAGE_PULL_POLICY=Always|IfNotPresent|Never
+#   OPENSHELL_E2E_DOCKER_RUNTIME=runsc
 #
 # The default community sandbox image uses :latest. This wrapper refreshes it
 # before starting the gateway, while the Docker driver defaults to IfNotPresent
@@ -116,6 +117,7 @@ DOCKER_NETWORK_MANAGED=0
 GPU_MODE="${OPENSHELL_E2E_DOCKER_GPU:-0}"
 OIDC_MODE="${OPENSHELL_E2E_OIDC_GATEWAY:-0}"
 OIDC_ISSUER="${OPENSHELL_E2E_OIDC_ISSUER:-}"
+DOCKER_RUNTIME="${OPENSHELL_E2E_DOCKER_RUNTIME:-}"
 
 if [ "${OIDC_MODE}" = "1" ] && [ -z "${OIDC_ISSUER}" ]; then
   echo "ERROR: OPENSHELL_E2E_OIDC_ISSUER is required when OPENSHELL_E2E_OIDC_GATEWAY=1" >&2
@@ -505,6 +507,9 @@ GATEWAY_CONFIG="${STATE_DIR}/gateway.toml"
   printf 'guest_tls_key = %s\n'        "$(toml_string "${PKI_DIR}/client/tls.key")"
   printf 'enable_bind_mounts = true\n'
   printf 'supervisor_image = %s\n'     "$(toml_string "${SUPERVISOR_IMAGE}")"
+  if [ -n "${DOCKER_RUNTIME}" ]; then
+    printf 'runtime = %s\n'            "$(toml_string "${DOCKER_RUNTIME}")"
+  fi
   if [ -n "${GATEWAY_HOST_ALIAS_IP}" ]; then
     printf 'host_gateway_ip = %s\n'    "$(toml_string "${GATEWAY_HOST_ALIAS_IP}")"
   fi

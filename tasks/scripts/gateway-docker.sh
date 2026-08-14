@@ -14,6 +14,7 @@
 # Common overrides:
 #   OPENSHELL_SERVER_PORT=19080 mise run gateway:docker
 #   OPENSHELL_DOCKER_GATEWAY_NAME=my-docker-gateway mise run gateway:docker
+#   OPENSHELL_DOCKER_RUNTIME=runsc mise run gateway:docker
 #   OPENSHELL_SANDBOX_NAMESPACE=my-ns mise run gateway:docker
 #   OPENSHELL_SANDBOX_IMAGE=ghcr.io/... mise run gateway:docker
 #
@@ -31,7 +32,17 @@ SANDBOX_NAMESPACE="${OPENSHELL_SANDBOX_NAMESPACE:-docker-dev}"
 SANDBOX_IMAGE="${OPENSHELL_SANDBOX_IMAGE:-ghcr.io/nvidia/openshell-community/sandboxes/base:latest}"
 SANDBOX_IMAGE_PULL_POLICY="${OPENSHELL_SANDBOX_IMAGE_PULL_POLICY:-IfNotPresent}"
 LOG_LEVEL="${OPENSHELL_LOG_LEVEL:-info}"
+DOCKER_RUNTIME="${OPENSHELL_DOCKER_RUNTIME:-}"
 GATEWAY_BIN="${ROOT}/target/debug/openshell-gateway"
+DOCKER_RUNTIME_CONFIG=""
+
+if [[ -n "${DOCKER_RUNTIME}" && ! "${DOCKER_RUNTIME}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "ERROR: OPENSHELL_DOCKER_RUNTIME must contain only letters, numbers, dots, underscores, or dashes" >&2
+  exit 2
+fi
+if [[ -n "${DOCKER_RUNTIME}" ]]; then
+  DOCKER_RUNTIME_CONFIG="runtime = \"${DOCKER_RUNTIME}\""
+fi
 
 normalize_arch() {
   case "$1" in
@@ -191,6 +202,7 @@ image_pull_policy = "${SANDBOX_IMAGE_PULL_POLICY}"
 sandbox_namespace = "${SANDBOX_NAMESPACE}"
 grpc_endpoint = "${GRPC_ENDPOINT}"
 supervisor_bin = "${SUPERVISOR_BIN}"
+${DOCKER_RUNTIME_CONFIG}
 EOF
 
 GATEWAY_ENDPOINT="http://127.0.0.1:${PORT}"
@@ -200,6 +212,9 @@ echo "Starting standalone Docker gateway..."
 echo "  gateway:   ${GATEWAY_NAME}"
 echo "  endpoint:  ${GATEWAY_ENDPOINT}"
 echo "  namespace: ${SANDBOX_NAMESPACE}"
+if [[ -n "${DOCKER_RUNTIME}" ]]; then
+  echo "  runtime:   ${DOCKER_RUNTIME}"
+fi
 echo "  state dir: ${STATE_DIR}"
 echo
 echo "Point the CLI at this gateway with one of:"

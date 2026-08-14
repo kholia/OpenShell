@@ -123,6 +123,13 @@ pub struct DockerComputeConfig {
     /// Docker bridge network that sandbox containers join.
     pub network_name: String,
 
+    /// Registered Docker OCI runtime selected for sandbox containers.
+    ///
+    /// An empty value leaves runtime selection to the Docker daemon. Set this
+    /// to a name reported by `docker info`, such as `runsc`, to apply that
+    /// runtime to every sandbox managed by this driver.
+    pub runtime: String,
+
     /// Host gateway IP used for sandbox host aliases.
     pub host_gateway_ip: String,
 
@@ -154,6 +161,7 @@ impl Default for DockerComputeConfig {
             guest_tls_cert: None,
             guest_tls_key: None,
             network_name: DEFAULT_DOCKER_NETWORK_NAME.to_string(),
+            runtime: String::new(),
             host_gateway_ip: String::new(),
             ssh_socket_path: openshell_core::container_paths::SSH_SOCKET_PATH.to_string(),
             sandbox_pids_limit: DEFAULT_SANDBOX_PIDS_LIMIT,
@@ -176,6 +184,7 @@ struct DockerDriverRuntimeConfig {
     sandbox_namespace: String,
     grpc_endpoint: String,
     network_name: String,
+    runtime: Option<String>,
     gateway_route: DockerGatewayRoute,
     gateway_callback_bind_address: Option<SocketAddr>,
     ssh_socket_path: String,
@@ -418,6 +427,10 @@ impl DockerComputeDriver {
         let cdi_gpu_inventory = docker_cdi_gpu_inventory(&info);
         let allow_all_default_gpu = docker_info_reports_wsl2(&info);
         validate_sandbox_pids_limit(docker_config.sandbox_pids_limit)?;
+        let runtime = docker_runtime(&docker_config.runtime, &info)?;
+        if let Some(runtime) = runtime.as_deref() {
+            info!(runtime, "using configured Docker OCI runtime");
+        }
         let gateway_port = config.bind_address.port();
         if gateway_port == 0 {
             return Err(Error::config(
@@ -458,6 +471,7 @@ impl DockerComputeDriver {
                 sandbox_namespace: docker_config.sandbox_namespace.clone(),
                 grpc_endpoint,
                 network_name,
+                runtime,
                 gateway_route,
                 gateway_callback_bind_address,
                 ssh_socket_path: docker_config.ssh_socket_path.clone(),
@@ -2691,6 +2705,7 @@ fn build_container_create_body_for_image(
                 "SYS_PTRACE".to_string(),
                 "SYSLOG".to_string(),
             ]),
+            runtime: config.runtime.clone(),
             // The sandbox supervisor needs to bind-mount `/run/netns`,
             // mark it shared, and create per-process network namespaces.
             // Docker's default AppArmor profile (`docker-default`) denies
@@ -2748,6 +2763,34 @@ fn docker_network_name(config: &DockerComputeConfig) -> String {
         return DEFAULT_DOCKER_NETWORK_NAME.to_string();
     }
     name.to_string()
+}
+
+fn docker_runtime(configured: &str, info: &SystemInfo) -> CoreResult<Option<String>> {
+    let runtime = configured.trim();
+    if runtime.is_empty() {
+        return Ok(None);
+    }
+
+    let Some(runtimes) = info.runtimes.as_ref() else {
+        return Err(Error::config(format!(
+            "docker runtime '{runtime}' was requested, but the Docker daemon did not report its registered runtimes"
+        )));
+    };
+
+    if runtimes.contains_key(runtime) {
+        return Ok(Some(runtime.to_string()));
+    }
+
+    let mut available = runtimes.keys().map(String::as_str).collect::<Vec<_>>();
+    available.sort_unstable();
+    let available = if available.is_empty() {
+        "none".to_string()
+    } else {
+        available.join(", ")
+    };
+    Err(Error::config(format!(
+        "docker runtime '{runtime}' is not registered with the Docker daemon (available: {available})"
+    )))
 }
 
 fn parse_optional_host_gateway_ip(value: &str) -> CoreResult<Option<IpAddr>> {

@@ -535,6 +535,8 @@ guest_tls_ca       = "/etc/openshell/certs/ca.pem"
 guest_tls_cert     = "/etc/openshell/certs/client.pem"
 guest_tls_key      = "/etc/openshell/certs/client-key.pem"
 network_name       = "openshell-docker"
+# Registered Docker OCI runtime for every sandbox. Empty uses the daemon default.
+# runtime           = "runsc"
 host_gateway_ip    = "172.17.0.1"
 ssh_socket_path    = "/run/openshell/ssh.sock"
 # Unsafe operator override. Host bind mounts, including Docker local-driver

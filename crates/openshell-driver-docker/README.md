@@ -18,6 +18,30 @@ The gateway runs as a host process. The Docker driver creates one container per
 sandbox and starts the `openshell-sandbox` supervisor inside that container. The
 supervisor then creates the nested sandbox namespace for the agent process.
 
+Set `[openshell.drivers.docker].runtime` to select a Docker-registered OCI
+runtime for every sandbox container. An empty value uses the Docker daemon's
+default runtime. The driver validates an explicit selection against the
+runtime inventory returned by Docker `/info` during gateway startup and fails
+before creating its bridge network or any sandbox when the name is missing.
+This setting is gateway-owned and cannot be overridden by per-sandbox driver
+config.
+
+For example, after installing and registering gVisor's `runsc` runtime on the
+Linux Docker host:
+
+```toml
+[openshell.drivers.docker]
+runtime = "runsc"
+```
+
+`runsc` adds a userspace-kernel isolation layer outside the OpenShell
+supervisor. It does not replace supervisor policy enforcement. Runtime syscall
+compatibility can also reduce defense-in-depth controls: if Landlock is
+unavailable, `best_effort` filesystem compatibility starts with a security
+finding while `hard_requirement` rejects the policy. If nftables operations
+are unavailable, the supervisor reports degraded network-bypass detection and
+continues to enforce traffic through its nested network namespace and proxy.
+
 ## Stop and Start
 
 Stop stops the managed container without removing it. Docker retains the
@@ -81,6 +105,7 @@ contract:
 |---|---|
 | `user = "0"` | The supervisor needs root inside the container to prepare namespaces, mounts, Landlock, and seccomp. |
 | `network_mode = openshell` | Places the supervisor on the managed Docker bridge network. |
+| `runtime` | Uses the gateway-selected Docker OCI runtime, or omits the field to inherit the daemon default. |
 | `cap_add` | Grants supervisor-only capabilities required for namespace setup and process inspection. |
 | `apparmor=unconfined` | Avoids Docker's default profile blocking required mount operations. |
 | `restart_policy = unless-stopped` | Keeps managed sandboxes resumable across daemon or gateway restarts. |

@@ -237,6 +237,21 @@ socket_path = "/tmp/docker.sock"
     }
 
     #[test]
+    fn docker_config_reads_runtime_from_driver_table() {
+        let file: config_file::ConfigFile = toml::from_str(
+            r#"
+[openshell.drivers.docker]
+runtime = "runsc"
+"#,
+        )
+        .expect("valid config");
+
+        let cfg = docker_config_from_context(test_context(Some(&file))).expect("docker config");
+
+        assert_eq!(cfg.runtime, "runsc");
+    }
+
+    #[test]
     fn docker_config_reports_selected_invalid_driver_table() {
         let file: config_file::ConfigFile = toml::from_str(
             r"

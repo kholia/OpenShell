@@ -41,6 +41,9 @@ default_image     = "ghcr.io/nvidia/openshell-community/sandboxes/base:latest"
 supervisor_image  = "ghcr.io/nvidia/openshell/supervisor:latest"
 # Only pull images that are not already cached locally.
 image_pull_policy = "IfNotPresent"
+# Registered Docker OCI runtime for sandbox containers. Leave unset to use the
+# daemon default. The runtime must appear in `docker info`, for example `runsc`.
+# runtime          = "runsc"
 # Prefix applied to sandbox container names.
 sandbox_namespace = "openshell"
 # Address sandbox containers use to call back to the gateway.

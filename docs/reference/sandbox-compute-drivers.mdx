@@ -136,7 +136,7 @@ that already covers loopback. Otherwise, the Docker driver requests a separate
 
 For maintainer-level implementation details, refer to the [Docker driver README](https://github.com/NVIDIA/OpenShell/blob/main/crates/openshell-driver-docker/README.md).
 
-Select Docker with `compute_drivers = ["docker"]` in `[openshell.gateway]`. Configure Docker driver values such as `socket_path`, `grpc_endpoint`, `network_name`, `supervisor_bin`, `supervisor_image`, `image_pull_policy`, `ssh_socket_path`, `sandbox_pids_limit`, and `guest_tls_*` in `[openshell.drivers.docker]`. When `socket_path` is unset, the driver uses the same responsive local socket selected by auto-detection. An explicitly selected Docker driver falls back to `/var/run/docker.sock` when no candidate responds.
+Select Docker with `compute_drivers = ["docker"]` in `[openshell.gateway]`. Configure Docker driver values such as `socket_path`, `grpc_endpoint`, `network_name`, `runtime`, `supervisor_bin`, `supervisor_image`, `image_pull_policy`, `ssh_socket_path`, `sandbox_pids_limit`, and `guest_tls_*` in `[openshell.drivers.docker]`. When `socket_path` is unset, the driver uses the same responsive local socket selected by auto-detection. An explicitly selected Docker driver falls back to `/var/run/docker.sock` when no candidate responds.
 
 Stop stops the existing Docker container without removing its writable
 layer or attached volumes. Start starts that same container. A durably
@@ -144,6 +144,50 @@ stopped container stays stopped across gateway restart, and delete remains
 responsible for removing it.
 
 For GPU-backed Docker sandboxes, configure Docker CDI before starting the gateway so OpenShell can detect the daemon capability.
+
+### gVisor `runsc`
+
+The Docker driver can run every sandbox with an alternate OCI runtime that is
+registered with the Docker daemon. Install and register
+[gVisor `runsc`](https://gvisor.dev/docs/user_guide/install/) on the native
+Linux host that runs Docker, restart Docker, and verify the registration:
+
+```shell
+docker info --format '{{json .Runtimes}}'
+```
+
+Select `runsc` in the gateway configuration:
+
+```toml
+[openshell.drivers.docker]
+runtime = "runsc"
+```
+
+An empty `runtime` uses the daemon default. An explicit value applies to every
+sandbox and cannot be changed through per-sandbox driver config. The gateway
+validates it against Docker's runtime inventory during startup and fails with
+the available names when it is not registered.
+
+From a source checkout, start a local gateway or run the Docker smoke test with
+`runsc`:
+
+```shell
+OPENSHELL_DOCKER_RUNTIME=runsc mise run gateway:docker
+mise run e2e:docker:runsc
+```
+
+This setup targets native Linux Docker Engine. Installing `runsc` on a macOS or
+Windows host does not register it inside Docker Desktop's Linux VM.
+
+<Warning>
+`runsc` strengthens the outer container boundary but does not replace
+OpenShell policy enforcement. If the runtime does not expose Landlock, a
+`best_effort` filesystem policy starts with a security finding and a
+`hard_requirement` policy fails. If nftables operations are unavailable, the
+supervisor reports degraded network-bypass detection while retaining its
+required nested network namespace and proxy enforcement. Do not enable gVisor
+test-only nftables support or host networking to suppress these diagnostics.
+</Warning>
 
 ### Docker Driver Config Mounts
 
