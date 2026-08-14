@@ -24,8 +24,7 @@ BOOT_START=$(date +%s%3N 2>/dev/null || date +%s)
 # The host.openshell.internal / host.containers.internal /
 # host.docker.internal DNS records served by gvproxy's embedded resolver
 # point at 192.168.127.254. We mirror that in /etc/hosts so the supervisor
-# can reach the gateway even when gvproxy's DNS is not in resolv.conf
-# (e.g. DHCP failed and we fell back to 8.8.8.8).
+# can reach the gateway without depending on DNS.
 GVPROXY_GATEWAY_IP="192.168.127.1"
 GVPROXY_HOST_LOOPBACK_IP="192.168.127.254"
 GATEWAY_IP="$GVPROXY_GATEWAY_IP"
@@ -49,6 +48,10 @@ mount_initial_fs() {
     mount -t tmpfs tmpfs /tmp 2>/dev/null || true
     mount -t tmpfs tmpfs /run 2>/dev/null || true
     mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+    ln -snf /proc/self/fd /dev/fd
+    ln -snf /proc/self/fd/0 /dev/stdin
+    ln -snf /proc/self/fd/1 /dev/stdout
+    ln -snf /proc/self/fd/2 /dev/stderr
 }
 
 bind_mount_into_newroot() {
@@ -779,8 +782,10 @@ DHCP_SCRIPT
     fi
 
     if [ ! -s "$(root_path /etc/resolv.conf)" ]; then
-        echo "nameserver 8.8.8.8" > "$(root_path /etc/resolv.conf)"
-        echo "nameserver 8.8.4.4" >> "$(root_path /etc/resolv.conf)"
+        # QEMU user networking exposes its DNS forwarder at the gateway IP.
+        # Use it instead of a public resolver: protected VM hosts may block
+        # direct UDP/53 while QEMU's forwarder remains reachable.
+        echo "nameserver ${GVPROXY_GATEWAY_IP}" > "$(root_path /etc/resolv.conf)"
     fi
 
     ensure_host_gateway_aliases

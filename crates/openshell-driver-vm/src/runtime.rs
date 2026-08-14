@@ -50,6 +50,7 @@ pub struct VmLaunchConfig {
     pub overlay_disk: PathBuf,
     pub image_disk: Option<PathBuf>,
     pub kernel_image: Option<PathBuf>,
+    pub qemu_firmware: Option<PathBuf>,
     pub vcpus: u8,
     pub mem_mib: u32,
     pub exec_path: String,
@@ -76,29 +77,28 @@ pub fn run_vm(config: &VmLaunchConfig) -> Result<(), String> {
 }
 
 fn run_qemu_vm(config: &VmLaunchConfig) -> Result<(), String> {
-    let gpu_bdf = config
-        .gpu_bdf
-        .as_deref()
-        .ok_or("gpu_bdf is required for QEMU backend")?;
-    let tap_device = config
-        .tap_device
-        .as_deref()
-        .ok_or("tap_device is required for QEMU backend")?;
-    let guest_mac = config
-        .guest_mac
-        .as_deref()
-        .ok_or("guest_mac is required for QEMU backend")?;
-    let vsock_cid = config
-        .vsock_cid
-        .ok_or("vsock_cid is required for QEMU backend")?;
-    let _guest_ip = config
-        .guest_ip
-        .as_deref()
-        .ok_or("guest_ip is required for QEMU backend")?;
-    let host_ip = config
-        .host_ip
-        .as_deref()
-        .ok_or("host_ip is required for QEMU backend")?;
+    let gpu_network = if let Some(gpu_bdf) = config.gpu_bdf.as_deref() {
+        Some((
+            gpu_bdf,
+            config
+                .tap_device
+                .as_deref()
+                .ok_or("tap_device is required for GPU QEMU backend")?,
+            config
+                .guest_mac
+                .as_deref()
+                .ok_or("guest_mac is required for GPU QEMU backend")?,
+            config
+                .vsock_cid
+                .ok_or("vsock_cid is required for GPU QEMU backend")?,
+            config
+                .host_ip
+                .as_deref()
+                .ok_or("host_ip is required for GPU QEMU backend")?,
+        ))
+    } else {
+        None
+    };
 
     if !config.root_disk.is_file() {
         return Err(format!(
@@ -128,9 +128,17 @@ fn run_qemu_vm(config: &VmLaunchConfig) -> Result<(), String> {
     let guest_env = qemu_guest_env_vars(config, host_dns_server());
     write_guest_env_file(&config.overlay_disk, &guest_env)?;
 
-    let gw_port = config.gateway_port.unwrap_or(0);
-    setup_tap_networking(tap_device, host_ip, gw_port)?;
-    let mut tap_guard = TapGuard::new(tap_device.to_string(), host_ip.to_string(), gw_port);
+    let mut tap_guard = if let Some((_, tap_device, _, _, host_ip)) = gpu_network {
+        let gw_port = config.gateway_port.unwrap_or(0);
+        setup_tap_networking(tap_device, host_ip, gw_port)?;
+        Some(TapGuard::new(
+            tap_device.to_string(),
+            host_ip.to_string(),
+            gw_port,
+        ))
+    } else {
+        None
+    };
 
     let vmlinux = if let Some(kernel_image) = &config.kernel_image {
         kernel_image.clone()
@@ -139,6 +147,11 @@ fn run_qemu_vm(config: &VmLaunchConfig) -> Result<(), String> {
     };
     if !vmlinux.is_file() {
         return Err(format!("VM kernel not found: {}", vmlinux.display()));
+    }
+    if let Some(firmware) = &config.qemu_firmware
+        && !firmware.is_file()
+    {
+        return Err(format!("QEMU firmware not found: {}", firmware.display()));
     }
 
     let kernel_cmdline = build_kernel_cmdline(config);
@@ -159,27 +172,46 @@ fn run_qemu_vm(config: &VmLaunchConfig) -> Result<(), String> {
         .arg(&vmlinux)
         .arg("-append")
         .arg(&kernel_cmdline)
-        .args(qemu_disk_args(config))
-        .arg("-netdev")
-        .arg(format!(
-            "tap,id=net0,ifname={tap_device},script=no,downscript=no"
-        ))
-        .arg("-device")
-        .arg("pcie-root-port,id=net_root,slot=3")
-        .arg("-device")
-        .arg(format!(
-            "virtio-net-pci-non-transitional,netdev=net0,mac={guest_mac},bus=net_root"
-        ))
-        .arg("-device")
-        .arg("pcie-root-port,id=vsock_root,slot=1")
-        .arg("-device")
-        .arg(format!(
-            "vhost-vsock-pci,guest-cid={vsock_cid},bus=vsock_root"
-        ))
-        .arg("-device")
-        .arg("pcie-root-port,id=gpu_root,slot=2")
-        .arg("-device")
-        .arg(format!("vfio-pci,host={gpu_bdf},bus=gpu_root"))
+        .args(qemu_disk_args(config));
+
+    if let Some(firmware) = &config.qemu_firmware {
+        if let Some(firmware_dir) = firmware.parent() {
+            qemu_cmd.arg("-L").arg(firmware_dir);
+        }
+        qemu_cmd.arg("-bios").arg(firmware);
+    }
+
+    if let Some((gpu_bdf, tap_device, guest_mac, vsock_cid, _)) = gpu_network {
+        qemu_cmd
+            .arg("-netdev")
+            .arg(format!(
+                "tap,id=net0,ifname={tap_device},script=no,downscript=no"
+            ))
+            .arg("-device")
+            .arg("pcie-root-port,id=net_root,slot=3")
+            .arg("-device")
+            .arg(format!(
+                "virtio-net-pci-non-transitional,netdev=net0,mac={guest_mac},bus=net_root"
+            ))
+            .arg("-device")
+            .arg("pcie-root-port,id=vsock_root,slot=1")
+            .arg("-device")
+            .arg(format!(
+                "vhost-vsock-pci,guest-cid={vsock_cid},bus=vsock_root"
+            ))
+            .arg("-device")
+            .arg("pcie-root-port,id=gpu_root,slot=2")
+            .arg("-device")
+            .arg(format!("vfio-pci,host={gpu_bdf},bus=gpu_root"));
+    } else {
+        qemu_cmd
+            .arg("-netdev")
+            .arg("user,id=net0,net=192.168.127.0/24,host=192.168.127.254,dns=192.168.127.1,dhcpstart=192.168.127.2")
+            .arg("-device")
+            .arg("virtio-net-pci,netdev=net0");
+    }
+
+    qemu_cmd
         .arg("-serial")
         .arg(format!("file:{}", config.console_output.display()));
 
@@ -211,8 +243,10 @@ fn run_qemu_vm(config: &VmLaunchConfig) -> Result<(), String> {
         .map_err(|e| format!("failed to wait for QEMU: {e}"))?;
 
     CHILD_PID.store(0, Ordering::Relaxed);
-    teardown_tap_networking(tap_device, host_ip, gw_port);
-    tap_guard.disarm();
+    if let Some(guard) = tap_guard.as_mut() {
+        teardown_tap_networking(&guard.tap_device, &guard.host_ip, guard.gateway_port);
+        guard.disarm();
+    }
 
     if status.success() {
         Ok(())
@@ -320,6 +354,10 @@ fn build_kernel_cmdline(config: &VmLaunchConfig) -> String {
 
     if config.gpu_bdf.is_some() {
         parts.push("firmware_class.path=/lib/firmware".to_string());
+    }
+
+    if config.qemu_firmware.is_some() {
+        parts.push("pti=off".to_string());
     }
 
     parts.join(" ")
@@ -1421,6 +1459,7 @@ mod tests {
             overlay_disk: PathBuf::from("/overlay.ext4"),
             image_disk: None,
             kernel_image: None,
+            qemu_firmware: None,
             vcpus: 2,
             mem_mib: 2048,
             exec_path: "/srv/openshell-vm-sandbox-init.sh".to_string(),
@@ -1502,6 +1541,20 @@ mod tests {
         assert!(!cmdline.contains("VM_NET_GW="));
         assert!(!cmdline.contains("VM_NET_DNS="));
         assert!(!cmdline.contains("GPU_ENABLED="));
+    }
+
+    #[test]
+    fn pvm_kernel_cmdline_disables_pti() {
+        let mut config = qemu_config();
+        config.qemu_firmware = Some(PathBuf::from("/qboot.rom"));
+
+        let cmdline = build_kernel_cmdline(&config);
+
+        assert!(
+            cmdline
+                .split_ascii_whitespace()
+                .any(|part| part == "pti=off")
+        );
     }
 
     #[test]

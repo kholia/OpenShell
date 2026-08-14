@@ -732,6 +732,9 @@ krun_log_level   = 1
 vcpus            = 2
 mem_mib          = 2048
 overlay_disk_mib = 4096
+# Optional PVM mode. Configure both paths together; QEMU must be on PATH.
+# pvm_kernel      = "/opt/openshell/pvm/vmlinux-guest"
+# pvm_firmware    = "/opt/openshell/pvm/qboot.rom"
 guest_tls_ca     = "/var/lib/openshell/guest-tls/ca.pem"
 guest_tls_cert   = "/var/lib/openshell/guest-tls/client.pem"
 guest_tls_key    = "/var/lib/openshell/guest-tls/client-key.pem"

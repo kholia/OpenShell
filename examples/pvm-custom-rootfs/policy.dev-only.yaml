@@ -1,0 +1,55 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# DEVELOPMENT ONLY. This policy intentionally grants any sandbox binary L4
+# access to broad Debian, Ubuntu, Launchpad, and GitHub download destinations.
+# Do not use it for production workloads or with untrusted code.
+
+version: 1
+
+filesystem_policy:
+  include_workdir: true
+  read_only:
+    - /bin
+    - /sbin
+    - /usr
+    - /lib
+    - /lib64
+    - /etc
+    - /proc
+    - /var/log
+    - /dev/urandom
+    - /opt
+  read_write:
+    - /sandbox
+    - /tmp
+    - /dev/null
+
+landlock:
+  compatibility: best_effort
+
+network_policies:
+  development_packages:
+    name: development-packages-dev-only
+    endpoints:
+      - { host: deb.debian.org, port: 80 }
+      - { host: deb.debian.org, port: 443 }
+      - { host: security.debian.org, port: 80 }
+      - { host: security.debian.org, port: 443 }
+      - { host: "**.debian.org", port: 80 }
+      - { host: "**.debian.org", port: 443 }
+      - { host: archive.ubuntu.com, port: 80 }
+      - { host: archive.ubuntu.com, port: 443 }
+      - { host: security.ubuntu.com, port: 80 }
+      - { host: security.ubuntu.com, port: 443 }
+      - { host: ports.ubuntu.com, port: 80 }
+      - { host: ports.ubuntu.com, port: 443 }
+      - { host: "**.ubuntu.com", port: 80 }
+      - { host: "**.ubuntu.com", port: 443 }
+      - { host: "**.launchpad.net", port: 443 }
+      - { host: "**.launchpadcontent.net", port: 443 }
+      - { host: github.com, port: 443 }
+      - { host: "**.github.com", port: 443 }
+      - { host: "**.githubusercontent.com", port: 443 }
+    # An empty list deliberately authorizes any binary for this dev-only rule.
+    binaries: []

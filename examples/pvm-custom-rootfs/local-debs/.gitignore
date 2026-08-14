@@ -1,0 +1,4 @@
+# Keep internal package artifacts out of the repository.
+*
+!.gitignore
+!README.md

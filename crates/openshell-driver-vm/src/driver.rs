@@ -226,6 +226,8 @@ pub struct VmDriverConfig {
     pub vcpus: u8,
     pub mem_mib: u32,
     pub overlay_disk_mib: u64,
+    pub pvm_kernel: Option<PathBuf>,
+    pub pvm_firmware: Option<PathBuf>,
     pub guest_tls_ca: Option<PathBuf>,
     pub guest_tls_cert: Option<PathBuf>,
     pub guest_tls_key: Option<PathBuf>,
@@ -258,6 +260,8 @@ impl Default for VmDriverConfig {
             vcpus: DEFAULT_VCPUS,
             mem_mib: DEFAULT_MEM_MIB,
             overlay_disk_mib: DEFAULT_OVERLAY_DISK_MIB,
+            pvm_kernel: None,
+            pvm_firmware: None,
             guest_tls_ca: None,
             guest_tls_cert: None,
             guest_tls_key: None,
@@ -449,6 +453,24 @@ impl VmDriver {
         }
         validate_openshell_endpoint(&config.openshell_endpoint)?;
         let _ = config.tls_paths()?;
+        match (&config.pvm_kernel, &config.pvm_firmware) {
+            (None, None) => {}
+            (Some(kernel), Some(firmware)) => {
+                if !kernel.is_file() {
+                    return Err(format!(
+                        "PVM guest kernel does not exist: {}",
+                        kernel.display()
+                    ));
+                }
+                if !firmware.is_file() {
+                    return Err(format!(
+                        "PVM qboot firmware does not exist: {}",
+                        firmware.display()
+                    ));
+                }
+            }
+            _ => return Err("pvm_kernel and pvm_firmware must be configured together".to_string()),
+        }
 
         #[cfg(target_os = "linux")]
         if config.gpu_enabled {
@@ -788,7 +810,7 @@ impl VmDriver {
             None
         };
 
-        let needs_qemu = is_gpu;
+        let needs_qemu = is_gpu || self.config.pvm_kernel.is_some();
 
         let mut plan =
             match self.build_vm_launch_plan(&sandbox.id, needs_qemu, is_gpu, gpu_bdf.clone()) {
@@ -806,6 +828,7 @@ impl VmDriver {
         // own release path, and the delete cleanup is gated on this flag; if
         // the flag were still unset the subnet would leak.
         if plan.backend == VmBackend::Qemu
+            && plan.tap_device.is_some()
             && let Err(err) = self.mark_qemu_network_allocated(&sandbox.id).await
         {
             self.release_gpu_and_subnet(&sandbox.id);
@@ -903,9 +926,12 @@ impl VmDriver {
         }
 
         let endpoint_override = if plan.backend == VmBackend::Qemu {
-            plan.host_ip.as_deref().map(|host_ip| {
-                guest_visible_openshell_endpoint_for_tap(&self.config.openshell_endpoint, host_ip)
-            })
+            Some(guest_visible_openshell_endpoint_for_tap(
+                &self.config.openshell_endpoint,
+                plan.host_ip
+                    .as_deref()
+                    .unwrap_or(GVPROXY_HOST_LOOPBACK_ALIAS),
+            ))
         } else {
             None
         };
@@ -929,6 +955,9 @@ impl VmDriver {
         command.arg("--vm-mem-mib").arg(plan.mem_mib.to_string());
         if let Some(kernel_image) = &plan.kernel_image {
             command.arg("--vm-kernel-image").arg(kernel_image);
+        }
+        if let Some(firmware) = &self.config.pvm_firmware {
+            command.arg("--vm-qemu-firmware").arg(firmware);
         }
 
         if plan.backend == VmBackend::Qemu {
@@ -1657,6 +1686,10 @@ impl VmDriver {
         if plan.gpu_bdf.is_none() {
             plan.gpu_bdf = gpu_bdf;
         }
+        if !is_gpu && self.config.pvm_kernel.is_some() {
+            plan.kernel_image.clone_from(&self.config.pvm_kernel);
+            return Ok(());
+        }
         if has_complete_qemu_network(plan) {
             return Ok(());
         }
@@ -1691,7 +1724,7 @@ impl VmDriver {
         // Remove this guard once the non-GPU QEMU launch path supports
         // emitting `pcie-root-port` + `vfio-pci` for arbitrary device
         // descriptors.
-        if plan.backend == VmBackend::Qemu && !is_gpu {
+        if plan.backend == VmBackend::Qemu && !is_gpu && plan.kernel_image.is_none() {
             let offending_feature = plan
                 .required_backend_features
                 .iter()
@@ -1701,7 +1734,7 @@ impl VmDriver {
                 });
             return Err(Status::failed_precondition(format!(
                 "vm lifecycle extension required '{offending_feature}', which resolves to the QEMU backend, \
-                 but non-GPU QEMU launch is not yet supported (pending PCI device transport)"
+                 but non-GPU QEMU launch requires a configured external kernel"
             )));
         }
         if plan.backend != VmBackend::Qemu && is_gpu {
@@ -1783,6 +1816,27 @@ impl VmDriver {
                 required_backend_features: Vec::new(),
                 kernel_profile: None,
                 kernel_image: None,
+                gpu_bdf: None,
+                tap_device: None,
+                guest_ip: None,
+                host_ip: None,
+                vsock_cid: None,
+                guest_mac: None,
+                gateway_port: None,
+                guest_init_dropins: Vec::new(),
+                env: Vec::new(),
+            });
+        }
+
+        if !is_gpu && self.config.pvm_kernel.is_some() {
+            return Ok(LaunchPlan {
+                backend: VmBackend::Qemu,
+                vcpus: self.config.vcpus,
+                mem_mib: self.config.mem_mib,
+                required_backends: Vec::new(),
+                required_backend_features: Vec::new(),
+                kernel_profile: None,
+                kernel_image: self.config.pvm_kernel.clone(),
                 gpu_bdf: None,
                 tap_device: None,
                 guest_ip: None,
@@ -2762,6 +2816,13 @@ impl VmDriver {
         command
             .arg("--vm-krun-log-level")
             .arg(self.config.krun_log_level.to_string());
+        if let Some(kernel) = &self.config.pvm_kernel {
+            command.arg("--vm-backend").arg("qemu");
+            command.arg("--vm-kernel-image").arg(kernel);
+        }
+        if let Some(firmware) = &self.config.pvm_firmware {
+            command.arg("--vm-qemu-firmware").arg(firmware);
+        }
         command
             .arg("--vm-env")
             .arg(format!("OPENSHELL_VM_INIT_MODE={IMAGE_PREP_INIT_MODE}"));
@@ -7943,6 +8004,28 @@ mod tests {
     }
 
     #[test]
+    fn pvm_sandbox_uses_external_kernel_without_tap_allocation() {
+        let mut driver = test_driver_with_extensions(LifecycleExtensionRegistry::new());
+        let kernel = PathBuf::from("/tmp/openshell-pvm-vmlinux");
+        driver.config.pvm_kernel = Some(kernel.clone());
+        driver.config.pvm_firmware = Some(PathBuf::from("/tmp/openshell-pvm-qboot.rom"));
+
+        let mut plan = driver
+            .build_vm_launch_plan("sandbox-pvm", true, false, None)
+            .expect("PVM plan should build");
+        driver
+            .resolve_launch_plan_backend("sandbox-pvm", false, None, &mut plan)
+            .expect("PVM backend should resolve");
+
+        assert_eq!(plan.backend, VmBackend::Qemu);
+        assert_eq!(plan.kernel_image.as_ref(), Some(&kernel));
+        assert!(plan.tap_device.is_none());
+        assert!(plan.guest_ip.is_none());
+        assert!(plan.host_ip.is_none());
+        assert!(plan.vsock_cid.is_none());
+    }
+
+    #[test]
     fn launch_plan_rejects_external_kernel_on_unsupported_backend() {
         let mut plan = LaunchPlan {
             backend: VmBackend::Libkrun,
@@ -7974,7 +8057,7 @@ mod tests {
         std::fs::write(&kernel, b"kernel").unwrap();
         plan.backend = VmBackend::Qemu;
         plan.kernel_image = Some(kernel);
-        VmDriver::validate_launch_plan_backend(true, &plan).expect("existing kernel is accepted");
+        VmDriver::validate_launch_plan_backend(false, &plan).expect("existing kernel is accepted");
         let _ = std::fs::remove_dir_all(base);
     }
 

@@ -47,6 +47,20 @@ OPENSHELL_VM_RUNTIME_COMPRESSED_DIR=$PWD/target/vm-runtime-compressed \
 Use `FROM_SOURCE=1 mise run vm:setup` to build the runtime from source instead
 of downloading `vm-runtime-<platform>.tar.zst`.
 
+PVM guest kernels are external QEMU inputs rather than libkrunfw payloads. Set
+both fields in the gateway configuration:
+
+```toml
+[openshell.drivers.vm]
+pvm_kernel = "/path/to/vmlinux-guest"
+pvm_firmware = "/path/to/qboot.rom"
+```
+
+The PVM kernel must provide the virtio, ext4, overlayfs, namespace, cgroup,
+seccomp, Landlock, bridge, and netfilter features required by the OpenShell
+sandbox supervisor. QEMU must be on `PATH`; PVM requires qboot and `pti=off`,
+which the driver adds to the guest command line.
+
 ## CI Ownership
 
 `release-vm-kernel.yml` is the on-demand producer for:

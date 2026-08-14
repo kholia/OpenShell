@@ -37,6 +37,19 @@ mise run gateway:vm
 
 First run takes a few minutes while `mise run vm:setup` stages libkrun/libkrunfw/gvproxy/umoci and `mise run vm:supervisor` builds the bundled guest supervisor. Subsequent runs are cached.
 
+Linux x86_64 PVM hosts must configure the PVM guest kernel and qboot firmware in
+the gateway VM driver configuration:
+
+```toml
+[openshell.drivers.vm]
+pvm_kernel = "/path/to/vmlinux-guest"
+pvm_firmware = "/path/to/qboot.rom"
+```
+
+PVM sandboxes use QEMU with user-mode networking. Image preparation uses the
+same kernel and firmware. The input kernel must be an uncompressed x86_64 ELF
+`vmlinux`, and `qemu-system-x86_64` must be available on `PATH`.
+
 By default `mise run gateway:vm`:
 
 - Listens on plaintext HTTP at `127.0.0.1:18081`.

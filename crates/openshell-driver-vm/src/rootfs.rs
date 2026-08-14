@@ -949,6 +949,15 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
+    fn guest_init_uses_qemu_dns_forwarder_for_gvproxy_fallback() {
+        let script = include_str!("../scripts/openshell-vm-sandbox-init.sh");
+
+        assert!(script.contains(
+            "echo \"nameserver ${GVPROXY_GATEWAY_IP}\" > \"$(root_path /etc/resolv.conf)\""
+        ));
+    }
+
+    #[test]
     fn prepare_sandbox_rootfs_rewrites_guest_layout() {
         let dir = unique_temp_dir();
         let rootfs = dir.join("rootfs");

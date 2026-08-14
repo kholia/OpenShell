@@ -95,6 +95,12 @@ pub struct VmComputeConfig {
     /// Writable overlay disk size for each VM sandbox, in MiB.
     pub overlay_disk_mib: u64,
 
+    /// PVM guest kernel loaded by QEMU instead of the libkrunfw kernel.
+    pub pvm_kernel: Option<PathBuf>,
+
+    /// qboot firmware used to enter the PVM guest through its supported boot path.
+    pub pvm_firmware: Option<PathBuf>,
+
     /// Host-side CA certificate for the guest's mTLS client bundle.
     pub guest_tls_ca: Option<PathBuf>,
 
@@ -164,6 +170,8 @@ impl Default for VmComputeConfig {
             vcpus: Self::default_vcpus(),
             mem_mib: Self::default_mem_mib(),
             overlay_disk_mib: Self::default_overlay_disk_mib(),
+            pvm_kernel: None,
+            pvm_firmware: None,
             guest_tls_ca: None,
             guest_tls_cert: None,
             guest_tls_key: None,
@@ -463,6 +471,29 @@ pub async fn spawn(
         ));
     }
 
+    match (&vm_config.pvm_kernel, &vm_config.pvm_firmware) {
+        (None, None) => {}
+        (Some(kernel), Some(firmware)) => {
+            if !kernel.is_file() {
+                return Err(Error::config(format!(
+                    "PVM guest kernel does not exist: {}",
+                    kernel.display()
+                )));
+            }
+            if !firmware.is_file() {
+                return Err(Error::config(format!(
+                    "PVM qboot firmware does not exist: {}",
+                    firmware.display()
+                )));
+            }
+        }
+        _ => {
+            return Err(Error::config(
+                "pvm_kernel and pvm_firmware must be configured together",
+            ));
+        }
+    }
+
     let driver_bin = resolve_compute_driver_bin(vm_config)?;
     let socket_path = compute_driver_socket_path(vm_config);
     let guest_tls_paths = compute_driver_guest_tls_paths(vm_config)?;
@@ -499,6 +530,12 @@ pub async fn spawn(
     command
         .arg("--overlay-disk-mib")
         .arg(vm_config.overlay_disk_mib.to_string());
+    if let Some(kernel) = &vm_config.pvm_kernel {
+        command.arg("--pvm-kernel").arg(kernel);
+    }
+    if let Some(firmware) = &vm_config.pvm_firmware {
+        command.arg("--pvm-firmware").arg(firmware);
+    }
     if let Some(tls) = guest_tls_paths {
         command.arg("--guest-tls-ca").arg(tls.ca);
         command.arg("--guest-tls-cert").arg(tls.cert);

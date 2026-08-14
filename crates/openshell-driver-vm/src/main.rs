@@ -41,6 +41,9 @@ struct Args {
     #[arg(long = "vm-kernel-image", hide = true)]
     vm_kernel_image: Option<PathBuf>,
 
+    #[arg(long = "vm-qemu-firmware", hide = true)]
+    vm_qemu_firmware: Option<PathBuf>,
+
     #[arg(long, hide = true)]
     vm_exec: Option<String>,
 
@@ -127,6 +130,12 @@ struct Args {
 
     #[arg(long, env = "OPENSHELL_VM_OVERLAY_DISK_MIB", default_value_t = 4096)]
     overlay_disk_mib: u64,
+
+    #[arg(long, env = "OPENSHELL_VM_PVM_KERNEL")]
+    pvm_kernel: Option<PathBuf>,
+
+    #[arg(long, env = "OPENSHELL_VM_PVM_FIRMWARE")]
+    pvm_firmware: Option<PathBuf>,
 
     #[arg(long, env = "OPENSHELL_VM_GPU")]
     gpu: bool,
@@ -230,6 +239,8 @@ async fn main() -> Result<()> {
         vcpus: args.vcpus,
         mem_mib: args.mem_mib,
         overlay_disk_mib: args.overlay_disk_mib,
+        pvm_kernel: args.pvm_kernel,
+        pvm_firmware: args.pvm_firmware,
         guest_tls_ca: args.guest_tls_ca.clone(),
         guest_tls_cert: args.guest_tls_cert.clone(),
         guest_tls_key: args.guest_tls_key.clone(),
@@ -535,6 +546,7 @@ fn build_vm_launch_config(args: &Args) -> std::result::Result<VmLaunchConfig, St
         overlay_disk,
         image_disk,
         kernel_image: args.vm_kernel_image.clone(),
+        qemu_firmware: args.vm_qemu_firmware.clone(),
         vcpus: args.vm_vcpus,
         mem_mib: args.vm_mem_mib,
         exec_path,

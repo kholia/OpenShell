@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Edit this list to customize packages baked into the development rootfs.
+bash
+build-essential
+ca-certificates
+curl
+git
+iproute2
+jq
+nftables
+util-linux
+wget
